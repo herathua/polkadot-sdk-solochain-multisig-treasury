@@ -26,7 +26,7 @@ fn increment_changes_42_to_43() {
         // Check that blockchain storage now contains 43.
         assert_eq!(Something::<Test>::get(), Some(43));
     });
-}clear
+}
 
 #[test]
 fn correct_error_for_none_value() {
