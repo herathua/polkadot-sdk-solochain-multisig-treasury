@@ -46,6 +46,19 @@ fn increment_fails_at_maximum_value() {
         assert_eq!(Something::<Test>::get(), Some(u32::MAX));
     });
 }
+#[test]
+fn unsigned_caller_cannot_store_value() {
+    new_test_ext().execute_with(|| {
+        // Try to store 42 without a signed account.
+        assert_noop!(
+            Template::do_something(RuntimeOrigin::none(), 42),
+            sp_runtime::DispatchError::BadOrigin
+        );
+
+        // Confirm that nothing was stored.
+        assert_eq!(Something::<Test>::get(), None);
+    });
+}
 
 #[test]
 fn correct_error_for_none_value() {
