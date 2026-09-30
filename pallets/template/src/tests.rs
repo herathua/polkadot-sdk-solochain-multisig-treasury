@@ -14,6 +14,19 @@ fn it_works_for_default_value() {
 		System::assert_last_event(Event::SomethingStored { something: 42, who: 1 }.into());
 	});
 }
+#[test]
+fn increment_changes_42_to_43() {
+    new_test_ext().execute_with(|| {
+        // Store 42 using test account 1.
+        assert_ok!(Template::do_something(RuntimeOrigin::signed(1), 42));
+
+        // This function increments the stored number when one exists.
+        assert_ok!(Template::cause_error(RuntimeOrigin::signed(1)));
+
+        // Check that blockchain storage now contains 43.
+        assert_eq!(Something::<Test>::get(), Some(43));
+    });
+}clear
 
 #[test]
 fn correct_error_for_none_value() {
