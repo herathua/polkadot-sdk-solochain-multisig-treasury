@@ -27,6 +27,25 @@ fn increment_changes_42_to_43() {
         assert_eq!(Something::<Test>::get(), Some(43));
     });
 }
+#[test]
+fn increment_fails_at_maximum_value() {
+    new_test_ext().execute_with(|| {
+        // Store the largest number a u32 can hold.
+        assert_ok!(Template::do_something(
+            RuntimeOrigin::signed(1),
+            u32::MAX
+        ));
+
+        // Incrementing must return StorageOverflow and leave storage unchanged.
+        assert_noop!(
+            Template::cause_error(RuntimeOrigin::signed(1)),
+            Error::<Test>::StorageOverflow
+        );
+
+        // Confirm the original number is still stored.
+        assert_eq!(Something::<Test>::get(), Some(u32::MAX));
+    });
+}
 
 #[test]
 fn correct_error_for_none_value() {
