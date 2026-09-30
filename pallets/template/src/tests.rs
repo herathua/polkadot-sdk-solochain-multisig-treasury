@@ -59,7 +59,19 @@ fn unsigned_caller_cannot_store_value() {
         assert_eq!(Something::<Test>::get(), None);
     });
 }
+#[test]
+fn another_signed_account_can_replace_value() {
+    new_test_ext().execute_with(|| {
+        // Account 1 stores 42.
+        assert_ok!(Template::do_something(RuntimeOrigin::signed(1), 42));
 
+        // Account 2 replaces it with 99.
+        assert_ok!(Template::do_something(RuntimeOrigin::signed(2), 99));
+
+        // The shared storage now contains 99.
+        assert_eq!(Something::<Test>::get(), Some(99));
+    });
+}
 #[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
