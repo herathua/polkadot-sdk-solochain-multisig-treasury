@@ -134,6 +134,8 @@ pub mod pallet {
 		StorageOverflow,
 		/// The approval threshold is zero or exceeds the number of signers.
 		InvalidThreshold,
+		/// The same account appears more than once in the signer list.
+		DuplicateSigner,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -216,5 +218,17 @@ pub mod pallet {
 
     	    Ok(())
     	}
+		pub(crate) fn validate_unique_signers(
+    		signers: &BoundedVec<T::AccountId, T::MaxSigners>,
+		) -> DispatchResult {
+			for (index, signer) in signers.iter().enumerate() {
+        		ensure!(
+            		!signers[..index].contains(signer),
+            		Error::<T>::DuplicateSigner
+        	);
+    	}
+
+    	Ok(())
+	}
 	}
 }

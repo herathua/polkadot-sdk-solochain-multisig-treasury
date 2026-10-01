@@ -126,6 +126,20 @@ fn two_of_three_threshold_is_accepted() {
     });
 }
 #[test]
+fn duplicate_signers_are_rejected() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 1, 2].try_into().expect("Three entries should fit");
+
+        assert_noop!(
+            MultisigTreasury::validate_unique_signers(&signers),
+            Error::<Test>::DuplicateSigner
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
