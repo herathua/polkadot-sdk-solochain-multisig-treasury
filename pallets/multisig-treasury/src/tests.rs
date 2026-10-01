@@ -419,6 +419,115 @@ fn proposal_id_counters_are_independent() {
     });
 }
 #[test]
+fn signer_can_open_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        assert_ok!(
+            MultisigTreasury::do_propose(0, 1, action_hash)
+        );
+
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((1u64, action_hash))
+        );
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 1);
+    });
+}
+#[test]
+fn outsider_cannot_open_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        // Account 4 is not a signer of multisig 0.
+        assert_noop!(
+            MultisigTreasury::do_propose(0, 4, action_hash),
+            Error::<Test>::NotASigner
+        );
+
+        // Rejection must not store a proposal or consume an ID.
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), None);
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+    });
+}
+#[test]
+fn proposal_for_missing_multisig_is_rejected() {
+    new_test_ext().execute_with(|| {
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        // We have not created multisig 99.
+        assert_noop!(
+            MultisigTreasury::do_propose(99, 1, action_hash),
+            Error::<Test>::MultisigNotFound
+        );
+
+        assert_eq!(crate::PendingProposals::<Test>::get(99, 0), None);
+        assert_eq!(crate::NextProposalId::<Test>::get(99), 0);
+    });
+}
+#[test]
+fn proposal_id_overflow_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        // Simulate this multisig reaching the proposal-ID limit.
+        crate::NextProposalId::<Test>::insert(0, u32::MAX);
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        assert_noop!(
+            MultisigTreasury::do_propose(0, 1, action_hash),
+            Error::<Test>::ProposalIdOverflow
+        );
+
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, u32::MAX),
+            None
+        );
+        assert_eq!(
+            crate::NextProposalId::<Test>::get(0),
+            u32::MAX
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

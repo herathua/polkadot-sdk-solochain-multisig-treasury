@@ -178,6 +178,10 @@ pub mod pallet {
 		MultisigIdOverflow,
 		/// The caller is not included in the signer list.
 		NotASigner,
+		/// The requested multisig does not exist.
+		MultisigNotFound,
+		/// No further proposal IDs can be allocated for this multisig.
+		ProposalIdOverflow,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -313,6 +317,33 @@ pub mod pallet {
 		    multisig_id,
 		    threshold,
 		});
+	    Ok(())
+		}
+		pub(crate) fn do_propose(
+	    multisig_id: u32,
+	    proposer: T::AccountId,
+	    action_hash: T::Hash,
+	) -> DispatchResult {
+	    let (signers, _threshold) = MultisigAccounts::<T>::get(multisig_id)
+	        .ok_or(Error::<T>::MultisigNotFound)?;
+	
+	    ensure!(
+	        signers.contains(&proposer),
+	        Error::<T>::NotASigner
+	    );
+	
+	    let proposal_id = NextProposalId::<T>::get(multisig_id);
+	    let next_id = proposal_id
+	        .checked_add(1)
+	        .ok_or(Error::<T>::ProposalIdOverflow)?;
+	
+	    PendingProposals::<T>::insert(
+	        multisig_id,
+	        proposal_id,
+	        (proposer, action_hash),
+	    );
+	    NextProposalId::<T>::insert(multisig_id, next_id);
+	
 	    Ok(())
 	}
 	}
