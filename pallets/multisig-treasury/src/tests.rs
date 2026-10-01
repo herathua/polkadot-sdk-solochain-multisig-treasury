@@ -690,6 +690,339 @@ fn opening_proposal_does_not_automatically_approve_it() {
     });
 }
 #[test]
+fn signer_can_approve_existing_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // Signer 2 approves proposal 0 belonging to multisig 0.
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 2));
+
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[2u64]
+        );
+    });
+}
+#[test]
+fn signer_cannot_approve_same_proposal_twice() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // The first approval succeeds.
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 2));
+
+        // The same signer cannot approve this proposal again.
+        assert_noop!(
+            MultisigTreasury::do_approve(0, 0, 2),
+            Error::<Test>::AlreadyApproved
+        );
+
+        // Exactly one approval remains.
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[2u64]
+        );
+    });
+}
+#[test]
+fn outsider_cannot_approve_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // Record a valid approval first.
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 2));
+
+        // Account 4 is not a signer.
+        assert_noop!(
+            MultisigTreasury::do_approve(0, 0, 4),
+            Error::<Test>::NotASigner
+        );
+
+        // The valid approval remains; the outsider was not added.
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[2u64]
+        );
+    });
+}
+#[test]
+fn signer_cannot_approve_missing_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        // Multisig 0 exists, but proposal 99 does not.
+        assert_noop!(
+            MultisigTreasury::do_approve(0, 99, 2),
+            Error::<Test>::ProposalNotFound
+        );
+
+        // No approval entry should have been created.
+        assert!(
+            !crate::ApprovalVotes::<Test>::contains_key(0, 99)
+        );
+    });
+}
+#[test]
+fn two_distinct_signers_can_approve_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 1));
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 2));
+
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[1u64, 2u64]
+        );
+
+        // Collecting approvals does not execute or remove the proposal.
+        assert!(crate::PendingProposals::<Test>::contains_key(0, 0));
+    });
+}
+#[test]
+fn approving_proposal_emits_event() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        assert_ok!(MultisigTreasury::do_approve(0, 0, 2));
+
+        System::assert_last_event(
+            Event::ProposalApproved {
+                multisig_id: 0,
+                proposal_id: 0,
+                approver: 2,
+            }
+            .into(),
+        );
+    });
+}
+#[test]
+fn signed_approval_records_actual_caller() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // Account 2 submits the approval transaction.
+        assert_ok!(
+            MultisigTreasury::approve(
+                RuntimeOrigin::signed(2),
+                0,
+                0,
+            )
+        );
+
+        // The vote belongs to the caller, account 2.
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[2u64]
+        );
+    });
+}
+#[test]
+fn unsigned_caller_cannot_approve_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        assert_noop!(
+            MultisigTreasury::approve(
+                RuntimeOrigin::none(),
+                0,
+                0,
+            ),
+            sp_runtime::DispatchError::BadOrigin
+        );
+
+        // No approval entry should have been created.
+        assert!(
+            !crate::ApprovalVotes::<Test>::contains_key(0, 0)
+        );
+    });
+}
+#[test]
+fn signed_outsider_cannot_submit_approval() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // Account 4 is signed, but is not in the signer list.
+        assert_noop!(
+            MultisigTreasury::approve(
+                RuntimeOrigin::signed(4),
+                0,
+                0,
+            ),
+            Error::<Test>::NotASigner
+        );
+
+        assert!(
+            !crate::ApprovalVotes::<Test>::contains_key(0, 0)
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

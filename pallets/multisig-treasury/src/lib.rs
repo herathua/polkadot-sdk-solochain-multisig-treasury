@@ -172,6 +172,12 @@ pub mod pallet {
 		    proposer: T::AccountId,
 		    action_hash: T::Hash,
 		},
+		/// A signer approved a proposal.
+		ProposalApproved {
+		    multisig_id: u32,
+		    proposal_id: u32,
+		    approver: T::AccountId,
+		},
 	}
 
 	/// Errors that can be returned by this pallet.
@@ -200,6 +206,14 @@ pub mod pallet {
 		MultisigNotFound,
 		/// No further proposal IDs can be allocated for this multisig.
 		ProposalIdOverflow,
+		/// The requested proposal does not exist.
+		ProposalNotFound,
+			
+		/// This signer has already approved the proposal.
+		AlreadyApproved,
+			
+		/// The approval list has reached its maximum length.
+		TooManyApprovals,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -304,6 +318,22 @@ pub mod pallet {
 		
 		    Self::do_propose(multisig_id, proposer, action_hash)
 		}
+
+		/// Approve an existing proposal as an authorised signer.
+		#[pallet::call_index(4)]
+		#[pallet::weight(
+		    Weight::from_parts(100_000_000, 10_000)
+		        .saturating_add(T::DbWeight::get().reads_writes(3, 1))
+		)]
+		pub fn approve(
+		    origin: OriginFor<T>,
+		    multisig_id: u32,
+		    proposal_id: u32,
+		) -> DispatchResult {
+		    let approver = ensure_signed(origin)?;
+		
+		    Self::do_approve(multisig_id, proposal_id, approver)
+		}
 	}
 	impl<T: Config> Pallet<T> {
     	pub(crate) fn validate_threshold(
@@ -381,6 +411,43 @@ pub mod pallet {
     		proposal_id,
     		proposer,
     		action_hash,
+		});
+	    Ok(())
+	}
+		pub(crate) fn do_approve(
+	    multisig_id: u32,
+	    proposal_id: u32,
+	    approver: T::AccountId,
+	) -> DispatchResult {
+	    let (signers, _threshold) = MultisigAccounts::<T>::get(multisig_id)
+	        .ok_or(Error::<T>::MultisigNotFound)?;
+	
+	    ensure!(
+	        PendingProposals::<T>::contains_key(multisig_id, proposal_id),
+	        Error::<T>::ProposalNotFound
+	    );
+	
+	    ensure!(
+	        signers.contains(&approver),
+	        Error::<T>::NotASigner
+	    );
+	
+	    let mut approvals = ApprovalVotes::<T>::get(multisig_id, proposal_id);
+	
+	    ensure!(
+	        !approvals.contains(&approver),
+	        Error::<T>::AlreadyApproved
+	    );
+	
+	    approvals
+	        .try_push(approver.clone())
+	        .map_err(|_| Error::<T>::TooManyApprovals)?;
+	
+	    ApprovalVotes::<T>::insert(multisig_id, proposal_id, approvals);
+		Self::deposit_event(Event::ProposalApproved {
+		    multisig_id,
+		    proposal_id,
+		    approver,
 		});
 	    Ok(())
 	}
