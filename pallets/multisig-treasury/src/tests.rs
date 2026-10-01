@@ -153,6 +153,30 @@ fn distinct_signers_are_accepted() {
     });
 }
 #[test]
+fn multisig_configuration_can_be_stored() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        // No configuration exists for ID 0 yet.
+        assert_eq!(crate::MultisigAccounts::<Test>::get(0), None);
+
+        // Save the signers and a threshold of 2.
+        crate::MultisigAccounts::<Test>::insert(
+            0,
+            (signers.clone(), 2u32),
+        );
+
+        // Read back exactly what we saved.
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(0),
+            Some((signers, 2u32))
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

@@ -96,6 +96,14 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type Something<T> = StorageValue<_, u32>;
 
+	#[pallet::storage]
+	pub type MultisigAccounts<T: Config> = StorageMap<
+    _,
+    Blake2_128Concat,
+    u32,
+    (BoundedVec<T::AccountId, T::MaxSigners>, u32),
+    OptionQuery,
+	>;
 	/// Events that functions in this pallet can emit.
 	///
 	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
