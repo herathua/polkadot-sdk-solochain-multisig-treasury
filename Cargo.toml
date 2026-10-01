@@ -9,6 +9,7 @@ edition = "2021"
 members = [
     "node",
     "pallets/template",
+    "pallets/multisig-treasury",
     "runtime",
 ]
 resolver = "2"
