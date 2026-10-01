@@ -528,6 +528,168 @@ fn proposal_id_overflow_changes_nothing() {
     });
 }
 #[test]
+fn opening_proposal_emits_event() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        assert_ok!(
+            MultisigTreasury::do_propose(0, 1, action_hash)
+        );
+
+        System::assert_last_event(
+            Event::ProposalOpened {
+                multisig_id: 0,
+                proposal_id: 0,
+                proposer: 1,
+                action_hash,
+            }
+            .into(),
+        );
+    });
+}
+#[test]
+fn signed_proposal_records_actual_caller() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        // Account 2 submits the proposal.
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(2),
+                0,
+                action_hash,
+            )
+        );
+
+        // The stored proposer must be account 2, not the creator.
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((2u64, action_hash))
+        );
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 1);
+    });
+}
+#[test]
+fn unsigned_caller_cannot_submit_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        assert_noop!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::none(),
+                0,
+                action_hash,
+            ),
+            sp_runtime::DispatchError::BadOrigin
+        );
+
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), None);
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+    });
+}
+#[test]
+fn signed_outsider_cannot_submit_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        // Account 4 is signed, but is not an authorised signer.
+        assert_noop!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(4),
+                0,
+                action_hash,
+            ),
+            Error::<Test>::NotASigner
+        );
+
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), None);
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+    });
+}
+#[test]
+fn opening_proposal_does_not_automatically_approve_it() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers,
+                2,
+            )
+        );
+
+        assert_ok!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1),
+                0,
+                sp_core::H256::repeat_byte(7),
+            )
+        );
+
+        // The proposal exists, but nobody has approved it yet.
+        assert!(crate::PendingProposals::<Test>::contains_key(0, 0));
+        assert!(crate::ApprovalVotes::<Test>::get(0, 0).is_empty());
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

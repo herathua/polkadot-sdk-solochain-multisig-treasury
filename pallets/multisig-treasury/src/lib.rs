@@ -137,6 +137,17 @@ pub mod pallet {
 	    u32,
 	    ValueQuery,
 	>;
+	/// Accounts that approved a proposal.
+	#[pallet::storage]
+	pub type ApprovalVotes<T: Config> = StorageDoubleMap<
+	    _,
+	    Blake2_128Concat,
+	    u32,
+	    Blake2_128Concat,
+	    u32,
+	    BoundedVec<T::AccountId, T::MaxSigners>,
+	    ValueQuery,
+	>;
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -153,6 +164,13 @@ pub mod pallet {
     	multisig_id: u32,
     	/// The approval threshold for the new multisig.
     	threshold: u32,
+		},
+		/// A signer opened a proposal.
+		ProposalOpened {
+		    multisig_id: u32,
+		    proposal_id: u32,
+		    proposer: T::AccountId,
+		    action_hash: T::Hash,
 		},
 	}
 
@@ -271,6 +289,21 @@ pub mod pallet {
 		
 		    Self::do_create_multisig(signers, threshold)
 		}
+		/// Open a proposal as an authorised signer.
+		#[pallet::call_index(3)]
+		#[pallet::weight(
+		    Weight::from_parts(100_000_000, 10_000)
+		        .saturating_add(T::DbWeight::get().reads_writes(2, 2))
+		)]
+		pub fn propose(
+		    origin: OriginFor<T>,
+		    multisig_id: u32,
+		    action_hash: T::Hash,
+		) -> DispatchResult {
+		    let proposer = ensure_signed(origin)?;
+		
+		    Self::do_propose(multisig_id, proposer, action_hash)
+		}
 	}
 	impl<T: Config> Pallet<T> {
     	pub(crate) fn validate_threshold(
@@ -337,13 +370,18 @@ pub mod pallet {
 	        .checked_add(1)
 	        .ok_or(Error::<T>::ProposalIdOverflow)?;
 	
-	    PendingProposals::<T>::insert(
-	        multisig_id,
-	        proposal_id,
-	        (proposer, action_hash),
-	    );
+		PendingProposals::<T>::insert(
+    		multisig_id,
+    		proposal_id,
+    		(proposer.clone(), action_hash),
+		);
 	    NextProposalId::<T>::insert(multisig_id, next_id);
-	
+		Self::deposit_event(Event::ProposalOpened {
+    		multisig_id,
+    		proposal_id,
+    		proposer,
+    		action_hash,
+		});
 	    Ok(())
 	}
 	}
