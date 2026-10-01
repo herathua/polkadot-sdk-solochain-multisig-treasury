@@ -127,6 +127,13 @@ pub mod pallet {
 			/// The account who set the new value.
 			who: T::AccountId,
 		},
+		/// A multisig configuration was created.
+		MultisigCreated {
+    	/// The ID of the new multisig.
+    	multisig_id: u32,
+    	/// The approval threshold for the new multisig.
+    	threshold: u32,
+		},
 	}
 
 	/// Errors that can be returned by this pallet.
@@ -260,7 +267,10 @@ pub mod pallet {
 	    // All checks passed: save the configuration and advance the counter.
 	    MultisigAccounts::<T>::insert(multisig_id, (signers, threshold));
 	    NextMultisigId::<T>::put(next_id);
-
+		Self::deposit_event(Event::MultisigCreated {
+		    multisig_id,
+		    threshold,
+		});
 	    Ok(())
 	}
 	}

@@ -288,6 +288,30 @@ fn creating_multisig_at_id_limit_changes_nothing() {
     });
 }
 #[test]
+fn creating_multisig_emits_event() {
+    new_test_ext().execute_with(|| {
+        // Events are recorded after the genesis block.
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::do_create_multisig(signers, 2)
+        );
+
+        System::assert_last_event(
+            Event::MultisigCreated {
+                multisig_id: 0,
+                threshold: 2,
+            }
+            .into(),
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
