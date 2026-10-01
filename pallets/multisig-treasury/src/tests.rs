@@ -312,6 +312,74 @@ fn creating_multisig_emits_event() {
     });
 }
 #[test]
+fn signer_can_create_multisig() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(1),
+                signers.clone(),
+                2,
+            )
+        );
+
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(0),
+            Some((signers, 2u32))
+        );
+    });
+}
+#[test]
+fn outsider_cannot_create_multisig() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        // Account 4 is signed, but is not in [1, 2, 3].
+        assert_noop!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::signed(4),
+                signers,
+                2,
+            ),
+            Error::<Test>::NotASigner
+        );
+
+        // Rejection must not create a configuration or consume an ID.
+        assert_eq!(crate::MultisigAccounts::<Test>::get(0), None);
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
+    });
+}
+#[test]
+fn unsigned_caller_cannot_create_multisig() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_noop!(
+            MultisigTreasury::create_multisig(
+                RuntimeOrigin::none(),
+                signers,
+                2,
+            ),
+            sp_runtime::DispatchError::BadOrigin
+        );
+
+        assert_eq!(crate::MultisigAccounts::<Test>::get(0), None);
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

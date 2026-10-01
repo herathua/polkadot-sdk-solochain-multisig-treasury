@@ -156,6 +156,8 @@ pub mod pallet {
 		DuplicateSigner,
 		/// No further multisig IDs can be allocated.
 		MultisigIdOverflow,
+		/// The caller is not included in the signer list.
+		NotASigner,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -224,6 +226,26 @@ pub mod pallet {
 					Ok(())
 				},
 			}
+		}
+			/// Create a multisig configuration with the caller as one of its signers.
+		#[pallet::call_index(2)]
+		#[pallet::weight(
+		    Weight::from_parts(100_000_000, 10_000)
+		        .saturating_add(T::DbWeight::get().reads_writes(1, 2))
+		)]
+		pub fn create_multisig(
+		    origin: OriginFor<T>,
+		    signers: BoundedVec<T::AccountId, T::MaxSigners>,
+		    threshold: u32,
+		) -> DispatchResult {
+		    let who = ensure_signed(origin)?;
+		
+		    ensure!(
+		        signers.contains(&who),
+		        Error::<T>::NotASigner
+		    );
+		
+		    Self::do_create_multisig(signers, threshold)
 		}
 	}
 	impl<T: Config> Pallet<T> {
