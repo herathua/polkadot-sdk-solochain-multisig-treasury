@@ -117,6 +117,26 @@ pub mod pallet {
 	///	The `generate_deposit` macro generates a function on `Pallet` called `deposit_event` which
 	/// will convert the event type of your pallet into `RuntimeEvent` (declared in the pallet's
 	/// [`Config`] trait) and deposit it using [`frame_system::Pallet::deposit_event`].
+	/// Proposer and action hash, indexed by multisig ID and proposal ID.
+	#[pallet::storage]
+	pub type PendingProposals<T: Config> = StorageDoubleMap<
+	    _,
+	    Blake2_128Concat,
+	    u32,
+	    Blake2_128Concat,
+	    u32,
+	    (T::AccountId, T::Hash),
+	    OptionQuery,
+	>;
+	/// The next proposal ID for each multisig.
+	#[pallet::storage]
+	pub type NextProposalId<T> = StorageMap<
+	    _,
+	    Blake2_128Concat,
+	    u32,
+	    u32,
+	    ValueQuery,
+	>;
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {

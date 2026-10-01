@@ -380,6 +380,45 @@ fn unsigned_caller_cannot_create_multisig() {
     });
 }
 #[test]
+fn proposal_storage_is_scoped_to_its_multisig() {
+    new_test_ext().execute_with(|| {
+        // A sample hash for testing storage, not a real encoded action.
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        // Save proposal 0 for multisig 0, proposed by account 1.
+        crate::PendingProposals::<Test>::insert(
+            0,
+            0,
+            (1u64, action_hash),
+        );
+
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((1u64, action_hash))
+        );
+
+        // Multisig 1 must not see multisig 0's proposal.
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(1, 0),
+            None
+        );
+    });
+}
+#[test]
+fn proposal_id_counters_are_independent() {
+    new_test_ext().execute_with(|| {
+        // Both counters start at zero.
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+        assert_eq!(crate::NextProposalId::<Test>::get(1), 0);
+
+        // Change only multisig 0's counter.
+        crate::NextProposalId::<Test>::insert(0, 1);
+
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 1);
+        assert_eq!(crate::NextProposalId::<Test>::get(1), 0);
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
