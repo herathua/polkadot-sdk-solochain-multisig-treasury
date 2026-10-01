@@ -147,6 +147,8 @@ pub mod pallet {
 		InvalidThreshold,
 		/// The same account appears more than once in the signer list.
 		DuplicateSigner,
+		/// No further multisig IDs can be allocated.
+		MultisigIdOverflow,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -240,6 +242,26 @@ pub mod pallet {
     	}
 
     	Ok(())
+	}
+		pub(crate) fn do_create_multisig(
+	    signers: BoundedVec<T::AccountId, T::MaxSigners>,
+	    threshold: u32,
+	) -> DispatchResult {
+	    // Reject invalid configurations before changing storage.
+	    Self::validate_threshold(&signers, threshold)?;
+	    Self::validate_unique_signers(&signers)?;
+
+	    // Calculate the next counter value without allowing overflow.
+	    let multisig_id = NextMultisigId::<T>::get();
+	    let next_id = multisig_id
+	        .checked_add(1)
+	        .ok_or(Error::<T>::MultisigIdOverflow)?;
+
+	    // All checks passed: save the configuration and advance the counter.
+	    MultisigAccounts::<T>::insert(multisig_id, (signers, threshold));
+	    NextMultisigId::<T>::put(next_id);
+
+	    Ok(())
 	}
 	}
 }

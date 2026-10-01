@@ -181,6 +181,111 @@ fn next_multisig_id_starts_at_zero() {
     new_test_ext().execute_with(|| {
         assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
     });
+}#[test]
+fn creating_multisig_stores_configuration_and_advances_id() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::do_create_multisig(signers.clone(), 2)
+        );
+
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(0),
+            Some((signers, 2u32))
+        );
+
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 1);
+    });
+}
+#[test]
+fn creating_multisig_with_duplicates_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 1, 2].try_into().expect("Three entries should fit");
+
+        // Creation must reject the duplicate account.
+        assert_noop!(
+            MultisigTreasury::do_create_multisig(signers, 2),
+            Error::<Test>::DuplicateSigner
+        );
+
+        // No configuration should have been saved.
+        assert_eq!(crate::MultisigAccounts::<Test>::get(0), None);
+
+        // The ID should still be available.
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
+    });
+}
+#[test]
+fn creating_two_multisigs_preserves_both_configurations() {
+    new_test_ext().execute_with(|| {
+        let first_signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        let second_signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![4, 5].try_into().expect("Two signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::do_create_multisig(first_signers.clone(), 2)
+        );
+
+        assert_ok!(
+            MultisigTreasury::do_create_multisig(second_signers.clone(), 2)
+        );
+
+        // Creating the second configuration must not overwrite the first.
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(0),
+            Some((first_signers, 2u32))
+        );
+
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(1),
+            Some((second_signers, 2u32))
+        );
+
+        // The next available ID is now 2.
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 2);
+    });
+}
+#[test]
+fn creating_multisig_at_id_limit_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        // Simulate the counter reaching its maximum.
+        crate::NextMultisigId::<Test>::put(u32::MAX);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_noop!(
+            MultisigTreasury::do_create_multisig(signers, 2),
+            Error::<Test>::MultisigIdOverflow
+        );
+
+        // Nothing was created at the maximum ID.
+        assert_eq!(
+            crate::MultisigAccounts::<Test>::get(u32::MAX),
+            None
+        );
+
+        // The counter remains unchanged.
+        assert_eq!(
+            crate::NextMultisigId::<Test>::get(),
+            u32::MAX
+        );
+    });
 }
 #[test]
 fn correct_error_for_none_value() {
