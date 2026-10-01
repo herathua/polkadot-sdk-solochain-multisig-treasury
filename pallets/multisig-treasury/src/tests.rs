@@ -177,6 +177,12 @@ fn multisig_configuration_can_be_stored() {
     });
 }
 #[test]
+fn next_multisig_id_starts_at_zero() {
+    new_test_ext().execute_with(|| {
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
