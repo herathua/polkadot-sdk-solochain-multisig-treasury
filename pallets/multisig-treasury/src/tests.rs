@@ -85,6 +85,47 @@ fn signer_list_rejects_a_fourth_account() {
     });
 }
 #[test]
+fn zero_approval_threshold_is_rejected() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_noop!(
+            MultisigTreasury::validate_threshold(&signers, 0),
+            Error::<Test>::InvalidThreshold
+        );
+    });
+}
+#[test]
+fn threshold_above_signer_count_is_rejected() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_noop!(
+            MultisigTreasury::validate_threshold(&signers, 4),
+            Error::<Test>::InvalidThreshold
+        );
+    });
+}
+#[test]
+fn two_of_three_threshold_is_accepted() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(
+            MultisigTreasury::validate_threshold(&signers, 2)
+        );
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.

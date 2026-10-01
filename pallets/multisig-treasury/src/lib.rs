@@ -132,6 +132,8 @@ pub mod pallet {
 		NoneValue,
 		/// There was an attempt to increment the value in storage over `u32::MAX`.
 		StorageOverflow,
+		/// The approval threshold is zero or exceeds the number of signers.
+		InvalidThreshold,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -201,5 +203,18 @@ pub mod pallet {
 				},
 			}
 		}
+	}
+	impl<T: Config> Pallet<T> {
+    	pub(crate) fn validate_threshold(
+    	    signers: &BoundedVec<T::AccountId, T::MaxSigners>,
+    	    threshold: u32,
+    	) -> DispatchResult {
+    	    ensure!(
+    	        threshold > 0 && threshold as usize <= signers.len(),
+    	        Error::<T>::InvalidThreshold
+    	    );
+
+    	    Ok(())
+    	}
 	}
 }
