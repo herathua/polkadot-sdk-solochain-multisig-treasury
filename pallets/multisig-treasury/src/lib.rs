@@ -84,6 +84,9 @@ pub mod pallet {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		/// A type representing the weights required by the dispatchables of this pallet.
 		type WeightInfo: WeightInfo;
+		/// Maximum number of signers allowed in one multisig account.
+		#[pallet::constant]
+		type MaxSigners: Get<u32>;
 	}
 
 	/// A storage item for this pallet.

@@ -73,6 +73,18 @@ fn another_signed_account_can_replace_value() {
     });
 }
 #[test]
+fn signer_list_rejects_a_fourth_account() {
+    new_test_ext().execute_with(|| {
+        let mut signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert!(signers.try_push(4).is_err());
+        assert_eq!(signers.as_slice(), &[1, 2, 3]);
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
