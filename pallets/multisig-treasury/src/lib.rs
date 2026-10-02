@@ -112,10 +112,12 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type NextMultisigId<T> = StorageValue<_, u32, ValueQuery>;
 
-	/// The designated veto authority for each multisig. Missing means no veto authority.
+	/// Signers voting to reject a pending proposal.
 	#[pallet::storage]
-	pub type VetoAuthorities<T: Config> =
-		StorageMap<_, Blake2_128Concat, u32, T::AccountId, OptionQuery>;
+	pub type RejectionVotes<T: Config> = StorageDoubleMap<
+		_, Blake2_128Concat, u32, Blake2_128Concat, u32,
+		BoundedVec<T::AccountId, T::MaxSigners>, ValueQuery,
+	>;
 	/// Proposer and action hash, indexed by multisig ID and proposal ID.
 	#[pallet::storage]
 	pub type PendingProposals<T: Config> = StorageDoubleMap<
@@ -192,6 +194,10 @@ pub mod pallet {
 		    proposal_id: u32,
 		    approver: T::AccountId,
 		},
+		/// A signer cast a rejection vote.
+		RejectionVoted { multisig_id: u32, proposal_id: u32, signer: T::AccountId },
+		/// The rejection threshold was reached and the pending proposal was removed.
+		ProposalRejected { multisig_id: u32, proposal_id: u32 },
 	}
 
 	/// Errors that can be returned by this pallet.
@@ -242,8 +248,10 @@ pub mod pallet {
 		InvalidProposalLifetime,
 		/// The expiry block calculation overflowed.
 		ProposalExpiryOverflow,
-		/// The signed caller is not the designated veto authority for this multisig.
-		NotVetoAuthority,
+		/// This signer has already voted to reject the proposal.
+		AlreadyRejected,
+		/// The rejection vote list is full.
+		TooManyRejections,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -353,7 +361,7 @@ pub mod pallet {
 		#[pallet::call_index(4)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(5, 1))
+		        .saturating_add(T::DbWeight::get().reads_writes(6, 2))
 		)]
 		pub fn approve(
 		    origin: OriginFor<T>,
@@ -368,7 +376,7 @@ pub mod pallet {
 		#[pallet::call_index(5)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(8, 3))
+		        .saturating_add(T::DbWeight::get().reads_writes(8, 4))
 		        .saturating_add(call.get_dispatch_info().call_weight)
 		)]
 		pub fn execute(
@@ -385,6 +393,42 @@ pub mod pallet {
 		    ensure!(signers.contains(&who), Error::<T>::NotASigner);
 		
 		    Self::do_execute(multisig_id, proposal_id, *call)
+		}
+
+		/// Vote to reject; reaching the approval threshold closes the proposal.
+		#[pallet::call_index(6)]
+		#[pallet::weight(
+			Weight::from_parts(100_000_000, 10_000)
+				.saturating_add(T::DbWeight::get().reads_writes(6, 4))
+		)]
+		pub fn reject(origin: OriginFor<T>, multisig_id: u32, proposal_id: u32) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let (signers, threshold) = MultisigAccounts::<T>::get(multisig_id)
+				.ok_or(Error::<T>::MultisigNotFound)?;
+			ensure!(signers.contains(&who), Error::<T>::NotASigner);
+			Self::ensure_proposal_not_expired(multisig_id, proposal_id)?;
+			let mut votes = RejectionVotes::<T>::get(multisig_id, proposal_id);
+			ensure!(!votes.contains(&who), Error::<T>::AlreadyRejected);
+			votes.try_push(who.clone()).map_err(|_| Error::<T>::TooManyRejections)?;
+			Self::deposit_event(Event::RejectionVoted { multisig_id, proposal_id, signer: who.clone() });
+			if votes.len() >= threshold as usize {
+				PendingProposals::<T>::remove(multisig_id, proposal_id);
+				ApprovalVotes::<T>::remove(multisig_id, proposal_id);
+				ProposalExpiry::<T>::remove(multisig_id, proposal_id);
+				RejectionVotes::<T>::remove(multisig_id, proposal_id);
+				Self::deposit_event(Event::ProposalRejected { multisig_id, proposal_id });
+			} else {
+				// Switching to rejection withdraws this signer's earlier approval.
+				let mut approvals = ApprovalVotes::<T>::get(multisig_id, proposal_id);
+				approvals.retain(|account| account != &who);
+				if approvals.is_empty() {
+					ApprovalVotes::<T>::remove(multisig_id, proposal_id);
+				} else {
+					ApprovalVotes::<T>::insert(multisig_id, proposal_id, approvals);
+				}
+				RejectionVotes::<T>::insert(multisig_id, proposal_id, votes);
+			}
+			Ok(())
 		}
 	}
 	impl<T: Config> Pallet<T> {
@@ -502,6 +546,14 @@ pub mod pallet {
 	        .map_err(|_| Error::<T>::TooManyApprovals)?;
 	
 	    ApprovalVotes::<T>::insert(multisig_id, proposal_id, approvals);
+	    // Switching to approval withdraws this signer's earlier rejection.
+	    let mut rejections = RejectionVotes::<T>::get(multisig_id, proposal_id);
+	    rejections.retain(|account| account != &approver);
+	    if rejections.is_empty() {
+	        RejectionVotes::<T>::remove(multisig_id, proposal_id);
+	    } else {
+	        RejectionVotes::<T>::insert(multisig_id, proposal_id, rejections);
+	    }
 		Self::deposit_event(Event::ProposalApproved {
 		    multisig_id,
 		    proposal_id,
@@ -598,6 +650,7 @@ pub mod pallet {
 	    PendingProposals::<T>::remove(multisig_id, proposal_id);
 	    ApprovalVotes::<T>::remove(multisig_id, proposal_id);
 	    ProposalExpiry::<T>::remove(multisig_id, proposal_id);
+	    RejectionVotes::<T>::remove(multisig_id, proposal_id);
 	
 	    call.dispatch(
 	        frame_system::RawOrigin::Signed(treasury).into(),
@@ -624,18 +677,5 @@ pub mod pallet {
 	
 	    Ok(())
 	}
-		/// Verify the designated role and return the caller for audit events.
-		pub(crate) fn ensure_veto_authority(
-			origin: OriginFor<T>,
-			multisig_id: u32,
-		) -> Result<T::AccountId, sp_runtime::DispatchError> {
-			let who = ensure_signed(origin)?;
-			ensure!(MultisigAccounts::<T>::contains_key(multisig_id), Error::<T>::MultisigNotFound);
-			ensure!(
-				VetoAuthorities::<T>::get(multisig_id).as_ref() == Some(&who),
-				Error::<T>::NotVetoAuthority
-			);
-			Ok(who)
-		}
 	} // End of pallet helper methods.
 }
