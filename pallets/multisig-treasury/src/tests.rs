@@ -1195,3 +1195,129 @@ fn treasury_accounts_are_stable_and_distinct() {
         assert_ne!(first, second);
     });
 }
+#[test]
+fn approved_proposal_rejects_a_changed_call() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        // Propose a specific action.
+        let original_call = RuntimeCall::System(
+            frame_system::Call::remark {
+                remark: vec![1, 2, 3],
+            },
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(
+                &original_call,
+            );
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            action_hash,
+        ));
+
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        // The original action passes both readiness checks.
+        assert_ok!(MultisigTreasury::ensure_ready_to_execute(
+            0, 0, &original_call,
+        ));
+
+        // Changing the action must fail, even with enough approvals.
+        let changed_call = RuntimeCall::System(
+            frame_system::Call::remark {
+                remark: vec![9, 9, 9],
+            },
+        );
+
+        assert_noop!(
+            MultisigTreasury::ensure_ready_to_execute(
+                0, 0, &changed_call,
+            ),
+            Error::<Test>::ActionHashMismatch
+        );
+    });
+}
+#[test]
+fn approved_action_executes_as_treasury_once() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(&call);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            action_hash,
+        ));
+
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        assert_ok!(MultisigTreasury::do_execute(
+            0, 0, call.clone(),
+        ));
+
+        // The action actually changed storage.
+        assert_eq!(Something::<Test>::get(), Some(42));
+
+        // The treasury account executed the action.
+        System::assert_last_event(
+            Event::<Test>::SomethingStored {
+                something: 42,
+                who: MultisigTreasury::treasury_account(0),
+            }
+            .into(),
+        );
+
+        // Successful execution removes the proposal and votes.
+        assert!(!crate::PendingProposals::<Test>::contains_key(0, 0));
+        assert!(!crate::ApprovalVotes::<Test>::contains_key(0, 0));
+
+        // The same proposal cannot execute again.
+        assert_noop!(
+            MultisigTreasury::do_execute(0, 0, call),
+            Error::<Test>::ProposalNotFound
+        );
+    });
+}

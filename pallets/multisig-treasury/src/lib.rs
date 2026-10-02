@@ -486,6 +486,23 @@ pub mod pallet {
 		    )
 		    .expect("runtime account type must support decoding from hash bytes")
 		}
+			pub(crate) fn ensure_ready_to_execute(
+	    multisig_id: u32,
+	    proposal_id: u32,
+	    call: &T::RuntimeCall,
+	) -> DispatchResult {
+	    use sp_runtime::traits::Hash;
+
+	    Self::ensure_enough_approvals(multisig_id, proposal_id)?;
+
+	    let action_hash = T::Hashing::hash_of(call);
+
+	    Self::ensure_matching_action(
+	        multisig_id,
+	        proposal_id,
+	        action_hash,
+	    )
+	}
 		pub(crate) fn ensure_matching_action(
 	    multisig_id: u32,
 	    proposal_id: u32,
@@ -502,5 +519,32 @@ pub mod pallet {
 
 	    Ok(())
 	}
+		}
+		#[frame_support::transactional]
+	pub(crate) fn do_execute(
+	    multisig_id: u32,
+	    proposal_id: u32,
+	    call: T::RuntimeCall,
+	) -> DispatchResult {
+	    use sp_runtime::traits::Dispatchable;
+	
+	    Self::ensure_ready_to_execute(
+	        multisig_id,
+	        proposal_id,
+	        &call,
+	    )?;
+	
+	    let treasury = Self::treasury_account(multisig_id);
+	
+	    // Consume the proposal before dispatch to prevent reuse.
+	    PendingProposals::<T>::remove(multisig_id, proposal_id);
+	    ApprovalVotes::<T>::remove(multisig_id, proposal_id);
+	
+	    call.dispatch(
+	        frame_system::RawOrigin::Signed(treasury).into(),
+	    )
+	    .map_err(|failure| failure.error)?;
+	
+	    Ok(())
 	}
 }
