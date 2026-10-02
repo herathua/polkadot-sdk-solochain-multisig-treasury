@@ -1545,3 +1545,53 @@ fn unsigned_caller_cannot_submit_execution() {
         );
     });
 }
+#[test]
+fn proposal_expiry_is_scoped_to_its_multisig() {
+    new_test_ext().execute_with(|| {
+        // Store a deadline for proposal 0 of multisig 0.
+        crate::ProposalExpiry::<Test>::insert(0, 0, 100u64);
+
+        assert_eq!(
+            crate::ProposalExpiry::<Test>::get(0, 0),
+            Some(100u64)
+        );
+
+        // Proposal 0 of a different multisig has no deadline.
+        assert_eq!(
+            crate::ProposalExpiry::<Test>::get(1, 0),
+            None
+        );
+    });
+}
+#[test]
+fn proposal_expires_at_its_deadline() {
+    new_test_ext().execute_with(|| {
+        // Set up proposal storage directly to test the expiry boundary.
+        crate::PendingProposals::<Test>::insert(
+            0,
+            0,
+            (1u64, sp_core::H256::repeat_byte(7)),
+        );
+        crate::ProposalExpiry::<Test>::insert(0, 0, 100u64);
+
+        // One block before the deadline: still valid.
+        System::set_block_number(99);
+        assert_ok!(
+            MultisigTreasury::ensure_proposal_not_expired(0, 0)
+        );
+
+        // At the deadline: expired.
+        System::set_block_number(100);
+        assert_noop!(
+            MultisigTreasury::ensure_proposal_not_expired(0, 0),
+            Error::<Test>::ProposalExpired
+        );
+
+        // After the deadline: still expired.
+        System::set_block_number(101);
+        assert_noop!(
+            MultisigTreasury::ensure_proposal_not_expired(0, 0),
+            Error::<Test>::ProposalExpired
+        );
+    });
+}

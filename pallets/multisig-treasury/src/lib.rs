@@ -139,6 +139,17 @@ pub mod pallet {
 	    BoundedVec<T::AccountId, T::MaxSigners>,
 	    ValueQuery,
 	>;
+	/// Expiry block for each proposal, indexed by multisig and proposal ID.
+	#[pallet::storage]
+	pub type ProposalExpiry<T: Config> = StorageDoubleMap<
+	    _,
+	    Blake2_128Concat,
+	    u32,
+	    Blake2_128Concat,
+	    u32,
+	    BlockNumberFor<T>,
+	    OptionQuery,
+	>;
 	/// Events emitted by this pallet.
 	///
 	/// The `generate_deposit` macro generates `deposit_event`, which converts this pallet's
@@ -215,6 +226,10 @@ pub mod pallet {
 
 		/// The action does not match the stored proposal.
 		ActionHashMismatch,
+		/// The proposal has no stored expiry block.
+		ProposalExpiryMissing,
+		/// The proposal has reached its expiry block.
+		ProposalExpired,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -569,5 +584,23 @@ pub mod pallet {
 	
 	    Ok(())
 	}
+		pub(crate) fn ensure_proposal_not_expired(
+	    multisig_id: u32,
+	    proposal_id: u32,
+	) -> DispatchResult {
+	    ensure!(
+	        PendingProposals::<T>::contains_key(multisig_id, proposal_id),
+	        Error::<T>::ProposalNotFound
+	    );
+	
+	    let expiry = ProposalExpiry::<T>::get(multisig_id, proposal_id)
+	        .ok_or(Error::<T>::ProposalExpiryMissing)?;
+	
+	    let current_block = frame_system::Pallet::<T>::block_number();
+	
+	    ensure!(current_block < expiry, Error::<T>::ProposalExpired);
+	
+	    Ok(())
 	}
+	} // End of pallet helper methods.
 }
