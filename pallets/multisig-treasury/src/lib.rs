@@ -107,16 +107,6 @@ pub mod pallet {
 	/// The ID to allocate to the next multisig configuration.
 	#[pallet::storage]
 	pub type NextMultisigId<T> = StorageValue<_, u32, ValueQuery>;
-	/// Events that functions in this pallet can emit.
-	///
-	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
-	/// or other users) that some notable update in the runtime has occurred. In a FRAME pallet, the
-	/// documentation for each event field and its parameters is added to a node's metadata so it
-	/// can be used by external interfaces or tools.
-	///
-	///	The `generate_deposit` macro generates a function on `Pallet` called `deposit_event` which
-	/// will convert the event type of your pallet into `RuntimeEvent` (declared in the pallet's
-	/// [`Config`] trait) and deposit it using [`frame_system::Pallet::deposit_event`].
 	/// Proposer and action hash, indexed by multisig ID and proposal ID.
 	#[pallet::storage]
 	pub type PendingProposals<T: Config> = StorageDoubleMap<
@@ -148,6 +138,10 @@ pub mod pallet {
 	    BoundedVec<T::AccountId, T::MaxSigners>,
 	    ValueQuery,
 	>;
+	/// Events emitted by this pallet.
+	///
+	/// The `generate_deposit` macro generates `deposit_event`, which converts this pallet's
+	/// events into `RuntimeEvent` and records them through `frame_system::Pallet::deposit_event`.
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
