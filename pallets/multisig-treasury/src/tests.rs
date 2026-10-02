@@ -2,6 +2,40 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn veto_role_is_designated_per_multisig() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64, <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers.clone(), 2,
+        ));
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+
+        // Only test setup assigns the role here; there is no public setter yet.
+        crate::VetoAuthorities::<Test>::insert(0, 9u64);
+        assert_ok!(MultisigTreasury::ensure_veto_authority(RuntimeOrigin::signed(9), 0), 9);
+
+        // Being a signer does not automatically grant veto authority.
+        assert_noop!(
+            MultisigTreasury::ensure_veto_authority(RuntimeOrigin::signed(1), 0),
+            Error::<Test>::NotVetoAuthority
+        );
+        // Authority for multisig 0 does not extend to multisig 1.
+        assert_noop!(
+            MultisigTreasury::ensure_veto_authority(RuntimeOrigin::signed(9), 1),
+            Error::<Test>::NotVetoAuthority
+        );
+        assert_noop!(
+            MultisigTreasury::ensure_veto_authority(RuntimeOrigin::none(), 0),
+            sp_runtime::DispatchError::BadOrigin
+        );
+    });
+}
+
+#[test]
 fn zero_proposal_lifetime_changes_nothing() {
     new_test_ext().execute_with(|| {
         System::set_block_number(10);

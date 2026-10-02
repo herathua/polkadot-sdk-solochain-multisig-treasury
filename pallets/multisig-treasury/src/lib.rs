@@ -111,6 +111,11 @@ pub mod pallet {
 	/// The ID to allocate to the next multisig configuration.
 	#[pallet::storage]
 	pub type NextMultisigId<T> = StorageValue<_, u32, ValueQuery>;
+
+	/// The designated veto authority for each multisig. Missing means no veto authority.
+	#[pallet::storage]
+	pub type VetoAuthorities<T: Config> =
+		StorageMap<_, Blake2_128Concat, u32, T::AccountId, OptionQuery>;
 	/// Proposer and action hash, indexed by multisig ID and proposal ID.
 	#[pallet::storage]
 	pub type PendingProposals<T: Config> = StorageDoubleMap<
@@ -237,6 +242,8 @@ pub mod pallet {
 		InvalidProposalLifetime,
 		/// The expiry block calculation overflowed.
 		ProposalExpiryOverflow,
+		/// The signed caller is not the designated veto authority for this multisig.
+		NotVetoAuthority,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -617,5 +624,18 @@ pub mod pallet {
 	
 	    Ok(())
 	}
+		/// Verify the designated role and return the caller for audit events.
+		pub(crate) fn ensure_veto_authority(
+			origin: OriginFor<T>,
+			multisig_id: u32,
+		) -> Result<T::AccountId, sp_runtime::DispatchError> {
+			let who = ensure_signed(origin)?;
+			ensure!(MultisigAccounts::<T>::contains_key(multisig_id), Error::<T>::MultisigNotFound);
+			ensure!(
+				VetoAuthorities::<T>::get(multisig_id).as_ref() == Some(&who),
+				Error::<T>::NotVetoAuthority
+			);
+			Ok(who)
+		}
 	} // End of pallet helper methods.
 }
