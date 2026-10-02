@@ -2,6 +2,51 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn missing_deadline_blocks_approval_and_execution() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+        let action_hash = <Test as frame_system::Config>::Hashing::hash_of(&call);
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(1), 0, 0));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(2), 0, 0));
+
+        // Simulate incomplete proposal data after collecting valid approvals.
+        assert!(crate::ProposalExpiry::<Test>::contains_key(0, 0));
+        crate::ProposalExpiry::<Test>::remove(0, 0);
+
+        assert_noop!(
+            MultisigTreasury::approve(RuntimeOrigin::signed(3), 0, 0),
+            Error::<Test>::ProposalExpiryMissing
+        );
+        assert_noop!(
+            MultisigTreasury::execute(RuntimeOrigin::signed(3), 0, 0, Box::new(call)),
+            Error::<Test>::ProposalExpiryMissing
+        );
+
+        // Neither request changes storage or runs the action.
+        assert_eq!(Something::<Test>::get(), None);
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), Some((1, action_hash)));
+        assert_eq!(crate::ApprovalVotes::<Test>::get(0, 0).as_slice(), &[1u64, 2u64]);
+        assert!(!crate::ProposalExpiry::<Test>::contains_key(0, 0));
+    });
+}
+
+#[test]
 fn proposal_deadline_overflow_changes_nothing() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
