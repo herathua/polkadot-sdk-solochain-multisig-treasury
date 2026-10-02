@@ -208,6 +208,12 @@ pub mod pallet {
 			
 		/// The approval list has reached its maximum length.
 		TooManyApprovals,
+
+		/// The proposal has fewer approvals than required.
+		NotEnoughApprovals,
+
+		/// The action does not match the stored proposal.
+		ActionHashMismatch,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -443,6 +449,43 @@ pub mod pallet {
 		    proposal_id,
 		    approver,
 		});
+	    Ok(())
+		}
+		pub(crate) fn ensure_enough_approvals(
+		    multisig_id: u32,
+		    proposal_id: u32,
+		) -> DispatchResult {
+		    let (_, threshold) = MultisigAccounts::<T>::get(multisig_id)
+		        .ok_or(Error::<T>::MultisigNotFound)?;
+
+		    ensure!(
+		        PendingProposals::<T>::contains_key(multisig_id, proposal_id),
+		        Error::<T>::ProposalNotFound
+		    );
+
+		    let approvals = ApprovalVotes::<T>::get(multisig_id, proposal_id);
+
+		    ensure!(
+		        approvals.len() >= threshold as usize,
+		        Error::<T>::NotEnoughApprovals
+		    );
+
+		    Ok(())
+		}
+		pub(crate) fn ensure_matching_action(
+	    multisig_id: u32,
+	    proposal_id: u32,
+	    action_hash: T::Hash,
+	) -> DispatchResult {
+	    let (_, stored_hash) =
+	        PendingProposals::<T>::get(multisig_id, proposal_id)
+	            .ok_or(Error::<T>::ProposalNotFound)?;
+
+	    ensure!(
+	        action_hash == stored_hash,
+	        Error::<T>::ActionHashMismatch
+	    );
+
 	    Ok(())
 	}
 	}

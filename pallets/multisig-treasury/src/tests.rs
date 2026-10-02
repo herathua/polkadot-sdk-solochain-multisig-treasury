@@ -1023,6 +1023,158 @@ fn signed_outsider_cannot_submit_approval() {
     });
 }
 #[test]
+fn one_approval_does_not_meet_two_of_three_threshold() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            sp_core::H256::repeat_byte(7),
+        ));
+
+        // Only account 1 approves. The threshold requires two accounts.
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1),
+            0,
+            0,
+        ));
+
+        assert_noop!(
+            MultisigTreasury::ensure_enough_approvals(0, 0),
+            Error::<Test>::NotEnoughApprovals
+        );
+    });
+}
+#[test]
+fn two_approvals_meet_two_of_three_threshold() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            sp_core::H256::repeat_byte(7),
+        ));
+
+        // Two different signers approve the same proposal.
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1),
+            0,
+            0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2),
+            0,
+            0,
+        ));
+
+        // Two approvals satisfy the required threshold.
+        assert_ok!(MultisigTreasury::ensure_enough_approvals(0, 0));
+    });
+}
+#[test]
+fn approval_check_rejects_missing_proposal() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        // Multisig 0 exists, but proposal 0 was never created.
+        assert_noop!(
+            MultisigTreasury::ensure_enough_approvals(0, 0),
+            Error::<Test>::ProposalNotFound
+        );
+    });
+}
+#[test]
+fn different_action_hash_is_rejected() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        // The proposal stores hash 7.
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            sp_core::H256::repeat_byte(7),
+        ));
+
+        // A different hash must be rejected without changing storage.
+        assert_noop!(
+            MultisigTreasury::ensure_matching_action(
+                0,
+                0,
+                sp_core::H256::repeat_byte(8),
+            ),
+            Error::<Test>::ActionHashMismatch
+        );
+    });
+}
+#[test]
+fn matching_action_hash_is_accepted() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        let action_hash = sp_core::H256::repeat_byte(7);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            action_hash,
+        ));
+
+        // The supplied hash matches the hash stored in the proposal.
+        assert_ok!(MultisigTreasury::ensure_matching_action(
+            0,
+            0,
+            action_hash,
+        ));
+    });
+}
+#[test]
 fn correct_error_for_none_value() {
 	new_test_ext().execute_with(|| {
 		// Ensure the expected error is thrown when no value is present.
