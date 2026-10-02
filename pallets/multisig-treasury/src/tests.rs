@@ -2,6 +2,80 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn approved_proposal_cannot_execute_at_its_deadline() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+        let action_hash = <Test as frame_system::Config>::Hashing::hash_of(&call);
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(1), 0, 0));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(2), 0, 0));
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+
+        // Enough approvals and a matching call are valid before expiry.
+        System::set_block_number(109);
+        assert_ok!(MultisigTreasury::ensure_ready_to_execute(0, 0, &call));
+
+        // At the deadline, execution must fail without changing storage.
+        System::set_block_number(110);
+        assert_noop!(
+            MultisigTreasury::execute(RuntimeOrigin::signed(3), 0, 0, Box::new(call)),
+            Error::<Test>::ProposalExpired
+        );
+        assert_eq!(Something::<Test>::get(), None);
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), Some((1, action_hash)));
+        assert_eq!(crate::ApprovalVotes::<Test>::get(0, 0).as_slice(), &[1u64, 2u64]);
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+    });
+}
+
+#[test]
+fn signer_cannot_approve_at_proposal_deadline() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+        let action_hash = sp_core::H256::repeat_byte(7);
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+
+        // Approval still works one block before expiry.
+        System::set_block_number(109);
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(1), 0, 0));
+
+        // A different signer cannot add a vote at the deadline.
+        System::set_block_number(110);
+        assert_noop!(
+            MultisigTreasury::approve(RuntimeOrigin::signed(2), 0, 0),
+            Error::<Test>::ProposalExpired
+        );
+        assert_eq!(crate::ApprovalVotes::<Test>::get(0, 0).as_slice(), &[1u64]);
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), Some((1, action_hash)));
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+    });
+}
+
+#[test]
 fn creating_proposal_stores_its_deadline() {
     new_test_ext().execute_with(|| {
         System::set_block_number(10);

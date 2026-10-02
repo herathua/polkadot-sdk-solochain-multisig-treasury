@@ -330,7 +330,7 @@ pub mod pallet {
 		#[pallet::call_index(3)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(2, 3))
+		        .saturating_add(T::DbWeight::get().reads_writes(3, 3))
 		)]
 		pub fn propose(
 		    origin: OriginFor<T>,
@@ -346,7 +346,7 @@ pub mod pallet {
 		#[pallet::call_index(4)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(3, 1))
+		        .saturating_add(T::DbWeight::get().reads_writes(5, 1))
 		)]
 		pub fn approve(
 		    origin: OriginFor<T>,
@@ -361,7 +361,7 @@ pub mod pallet {
 		#[pallet::call_index(5)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(5, 2))
+		        .saturating_add(T::DbWeight::get().reads_writes(8, 2))
 		        .saturating_add(call.get_dispatch_info().call_weight)
 		)]
 		pub fn execute(
@@ -476,10 +476,7 @@ pub mod pallet {
 	    let (signers, _threshold) = MultisigAccounts::<T>::get(multisig_id)
 	        .ok_or(Error::<T>::MultisigNotFound)?;
 	
-	    ensure!(
-	        PendingProposals::<T>::contains_key(multisig_id, proposal_id),
-	        Error::<T>::ProposalNotFound
-	    );
+	    Self::ensure_proposal_not_expired(multisig_id, proposal_id)?;
 	
 	    ensure!(
 	        signers.contains(&approver),
@@ -548,6 +545,7 @@ pub mod pallet {
 	    use sp_runtime::traits::Hash;
 
 	    Self::ensure_enough_approvals(multisig_id, proposal_id)?;
+	    Self::ensure_proposal_not_expired(multisig_id, proposal_id)?;
 
 	    let action_hash = T::Hashing::hash_of(call);
 
