@@ -34,14 +34,20 @@ mod runtime {
 impl frame_system::Config for Test {
 	type Block = Block;
 }
+frame_support::parameter_types! {
+    pub static ProposalLifetime: u64 = 100;
+}
+
 impl pallet_multisig_treasury::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 	type MaxSigners = frame_support::traits::ConstU32<3>;
-	type ProposalLifetime = frame_support::traits::ConstU64<100>;
+	type ProposalLifetime = ProposalLifetime;
 }
 
 // Build genesis storage according to the mock runtime.
 pub fn new_test_ext() -> sp_io::TestExternalities {
+	// Reset the adjustable lifetime for each test environment.
+	ProposalLifetime::set(100);
 	frame_system::GenesisConfig::<Test>::default().build_storage().unwrap().into()
 }

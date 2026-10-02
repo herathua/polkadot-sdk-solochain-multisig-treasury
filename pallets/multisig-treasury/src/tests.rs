@@ -2,6 +2,36 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn zero_proposal_lifetime_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+
+        // Simulate an invalid runtime configuration, only in this test.
+        ProposalLifetime::set(0);
+        assert_noop!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1), 0, sp_core::H256::repeat_byte(7),
+            ),
+            Error::<Test>::InvalidProposalLifetime
+        );
+
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+        assert!(!crate::NextProposalId::<Test>::contains_key(0));
+        assert!(!crate::PendingProposals::<Test>::contains_key(0, 0));
+        assert!(!crate::ProposalExpiry::<Test>::contains_key(0, 0));
+        assert!(!crate::ApprovalVotes::<Test>::contains_key(0, 0));
+        ProposalLifetime::set(100);
+    });
+}
+
+#[test]
 fn missing_deadline_blocks_approval_and_execution() {
     new_test_ext().execute_with(|| {
         use sp_runtime::traits::Hash;
