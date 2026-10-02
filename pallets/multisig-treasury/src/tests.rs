@@ -2,6 +2,92 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn rejecting_one_proposal_leaves_another_executable() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64, <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+        let rejected_call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+        let surviving_call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 99 },
+        );
+        let rejected_hash = <Test as frame_system::Config>::Hashing::hash_of(&rejected_call);
+        let surviving_hash = <Test as frame_system::Config>::Hashing::hash_of(&surviving_call);
+        assert_ok!(MultisigTreasury::propose(RuntimeOrigin::signed(1), 0, rejected_hash));
+        assert_ok!(MultisigTreasury::propose(RuntimeOrigin::signed(1), 0, surviving_hash));
+
+        // Proposal 1 has two approvals and one rejection, below the rejection threshold.
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(1), 0, 1));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(2), 0, 1));
+        assert_ok!(MultisigTreasury::reject(RuntimeOrigin::signed(3), 0, 1));
+
+        // Reject only proposal 0.
+        assert_ok!(MultisigTreasury::reject(RuntimeOrigin::signed(1), 0, 0));
+        assert_ok!(MultisigTreasury::reject(RuntimeOrigin::signed(2), 0, 0));
+        assert!(!crate::PendingProposals::<Test>::contains_key(0, 0));
+        assert_noop!(
+            MultisigTreasury::execute(RuntimeOrigin::signed(1), 0, 0, Box::new(rejected_call)),
+            Error::<Test>::ProposalNotFound
+        );
+
+        // All proposal 1 data survives rejection of proposal 0.
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 1), Some((1, surviving_hash)));
+        assert_eq!(crate::ApprovalVotes::<Test>::get(0, 1).as_slice(), &[1u64, 2u64]);
+        assert_eq!(crate::RejectionVotes::<Test>::get(0, 1).as_slice(), &[3u64]);
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 1), Some(110));
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 2);
+        assert_ok!(MultisigTreasury::execute(
+            RuntimeOrigin::signed(1), 0, 1, Box::new(surviving_call),
+        ));
+        assert_eq!(Something::<Test>::get(), Some(99));
+        assert!(!crate::PendingProposals::<Test>::contains_key(0, 1));
+        assert!(!crate::ApprovalVotes::<Test>::contains_key(0, 1));
+        assert!(!crate::RejectionVotes::<Test>::contains_key(0, 1));
+        assert!(!crate::ProposalExpiry::<Test>::contains_key(0, 1));
+    });
+}
+
+#[test]
+fn rejection_at_deadline_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(10);
+        let signers: frame_support::BoundedVec<
+            u64, <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+        let action_hash = sp_core::H256::repeat_byte(7);
+        assert_ok!(MultisigTreasury::propose(RuntimeOrigin::signed(1), 0, action_hash));
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+        assert_ok!(MultisigTreasury::approve(RuntimeOrigin::signed(2), 0, 0));
+
+        // A rejection is accepted one block before expiry.
+        System::set_block_number(109);
+        assert_ok!(MultisigTreasury::reject(RuntimeOrigin::signed(1), 0, 0));
+
+        // At expiry, switching to rejection must not remove an existing approval
+        // or supply the second rejection needed to close the proposal.
+        System::set_block_number(110);
+        assert_noop!(
+            MultisigTreasury::reject(RuntimeOrigin::signed(2), 0, 0),
+            Error::<Test>::ProposalExpired
+        );
+        assert_eq!(crate::PendingProposals::<Test>::get(0, 0), Some((1, action_hash)));
+        assert_eq!(crate::ApprovalVotes::<Test>::get(0, 0).as_slice(), &[2u64]);
+        assert_eq!(crate::RejectionVotes::<Test>::get(0, 0).as_slice(), &[1u64]);
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110));
+    });
+}
+
+#[test]
 fn rejection_can_be_changed_to_approval() {
     new_test_ext().execute_with(|| {
         use sp_runtime::traits::Hash;
