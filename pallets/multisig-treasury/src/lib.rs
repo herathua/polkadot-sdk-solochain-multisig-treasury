@@ -38,7 +38,7 @@
 
 // We make sure this pallet uses `no_std` for compiling to Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
-
+extern crate alloc;
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;
 
@@ -67,6 +67,7 @@ pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
+	use alloc::boxed::Box;
 
 	// The `Pallet` struct serves as a placeholder to implement traits, methods and dispatchables
 	// (`Call`s) in this pallet.
@@ -333,6 +334,28 @@ pub mod pallet {
 		    let approver = ensure_signed(origin)?;
 		
 		    Self::do_approve(multisig_id, proposal_id, approver)
+		}
+		/// Execute an approved proposal as the treasury account.
+		#[pallet::call_index(5)]
+		#[pallet::weight(
+		    Weight::from_parts(100_000_000, 10_000)
+		        .saturating_add(T::DbWeight::get().reads_writes(5, 2))
+		        .saturating_add(call.get_dispatch_info().call_weight)
+		)]
+		pub fn execute(
+		    origin: OriginFor<T>,
+		    multisig_id: u32,
+		    proposal_id: u32,
+		    call: Box<T::RuntimeCall>,
+		) -> DispatchResult {
+		    let who = ensure_signed(origin)?;
+		
+		    let (signers, _) = MultisigAccounts::<T>::get(multisig_id)
+		        .ok_or(Error::<T>::MultisigNotFound)?;
+		
+		    ensure!(signers.contains(&who), Error::<T>::NotASigner);
+		
+		    Self::do_execute(multisig_id, proposal_id, *call)
 		}
 	}
 	impl<T: Config> Pallet<T> {

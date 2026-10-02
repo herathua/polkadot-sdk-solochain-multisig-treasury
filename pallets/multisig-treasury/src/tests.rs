@@ -1321,3 +1321,227 @@ fn approved_action_executes_as_treasury_once() {
         );
     });
 }
+#[test]
+fn failed_execution_preserves_proposal_and_approvals() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        // This action fails when Something has no stored value.
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::cause_error {},
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(&call);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1),
+            0,
+            action_hash,
+        ));
+
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        // Execution fails, and all storage must remain unchanged.
+        assert_noop!(
+            MultisigTreasury::do_execute(0, 0, call),
+            Error::<Test>::NoneValue
+        );
+
+        // The proposal and both approvals are still available.
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((1, action_hash))
+        );
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[1u64, 2u64]
+        );
+        assert_eq!(Something::<Test>::get(), None);
+    });
+}
+#[test]
+fn signer_can_submit_execution() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        System::set_block_number(1);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(&call);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        // Signer 3 submits execution after signers 1 and 2 approve.
+        assert_ok!(MultisigTreasury::execute(
+            RuntimeOrigin::signed(3),
+            0,
+            0,
+            Box::new(call),
+        ));
+
+        assert_eq!(Something::<Test>::get(), Some(42));
+
+        // The action runs as the treasury, not the submitting signer.
+        System::assert_last_event(
+            Event::<Test>::SomethingStored {
+                something: 42,
+                who: MultisigTreasury::treasury_account(0),
+            }
+            .into(),
+        );
+    });
+}
+#[test]
+fn outsider_cannot_submit_execution() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(&call);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        // Account 4 is not a signer of this multisig.
+        assert_noop!(
+            MultisigTreasury::execute(
+                RuntimeOrigin::signed(4),
+                0,
+                0,
+                Box::new(call),
+            ),
+            Error::<Test>::NotASigner
+        );
+
+        // The action did not run.
+        assert_eq!(Something::<Test>::get(), None);
+
+        // The approved proposal remains available.
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((1, action_hash))
+        );
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[1u64, 2u64]
+        );
+    });
+}
+#[test]
+fn unsigned_caller_cannot_submit_execution() {
+    new_test_ext().execute_with(|| {
+        use sp_runtime::traits::Hash;
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1),
+            signers,
+            2,
+        ));
+
+        let call = RuntimeCall::MultisigTreasury(
+            crate::Call::do_something { something: 42 },
+        );
+
+        let action_hash =
+            <Test as frame_system::Config>::Hashing::hash_of(&call);
+
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, action_hash,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(1), 0, 0,
+        ));
+        assert_ok!(MultisigTreasury::approve(
+            RuntimeOrigin::signed(2), 0, 0,
+        ));
+
+        // No signed account submitted this request.
+        assert_noop!(
+            MultisigTreasury::execute(
+                RuntimeOrigin::none(),
+                0,
+                0,
+                Box::new(call),
+            ),
+            sp_runtime::DispatchError::BadOrigin
+        );
+
+        // Execution was rejected without consuming the proposal.
+        assert_eq!(Something::<Test>::get(), None);
+        assert_eq!(
+            crate::PendingProposals::<Test>::get(0, 0),
+            Some((1, action_hash))
+        );
+        assert_eq!(
+            crate::ApprovalVotes::<Test>::get(0, 0).as_slice(),
+            &[1u64, 2u64]
+        );
+    });
+}
