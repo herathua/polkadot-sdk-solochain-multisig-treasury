@@ -519,7 +519,6 @@ pub mod pallet {
 
 	    Ok(())
 	}
-		}
 		#[frame_support::transactional]
 	pub(crate) fn do_execute(
 	    multisig_id: u32,
@@ -546,5 +545,6 @@ pub mod pallet {
 	    .map_err(|failure| failure.error)?;
 	
 	    Ok(())
+	}
 	}
 }
