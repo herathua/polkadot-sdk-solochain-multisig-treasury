@@ -361,7 +361,7 @@ pub mod pallet {
 		#[pallet::call_index(5)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(8, 2))
+		        .saturating_add(T::DbWeight::get().reads_writes(8, 3))
 		        .saturating_add(call.get_dispatch_info().call_weight)
 		)]
 		pub fn execute(
@@ -590,6 +590,7 @@ pub mod pallet {
 	    // Consume the proposal before dispatch to prevent reuse.
 	    PendingProposals::<T>::remove(multisig_id, proposal_id);
 	    ApprovalVotes::<T>::remove(multisig_id, proposal_id);
+	    ProposalExpiry::<T>::remove(multisig_id, proposal_id);
 	
 	    call.dispatch(
 	        frame_system::RawOrigin::Signed(treasury).into(),

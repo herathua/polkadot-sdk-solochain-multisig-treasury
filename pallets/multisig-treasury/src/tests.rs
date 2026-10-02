@@ -2,6 +2,37 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn proposal_deadline_overflow_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+
+        // Adding the configured 100-block lifetime would exceed u64::MAX.
+        System::set_block_number(u64::MAX - 50);
+        assert_noop!(
+            MultisigTreasury::propose(
+                RuntimeOrigin::signed(1), 0, sp_core::H256::repeat_byte(7),
+            ),
+            Error::<Test>::ProposalExpiryOverflow
+        );
+
+        // Rejection must not allocate an ID or leave partial proposal data.
+        assert_eq!(crate::NextProposalId::<Test>::get(0), 0);
+        assert!(!crate::NextProposalId::<Test>::contains_key(0));
+        assert!(!crate::PendingProposals::<Test>::contains_key(0, 0));
+        assert!(!crate::ProposalExpiry::<Test>::contains_key(0, 0));
+        assert!(!crate::ApprovalVotes::<Test>::contains_key(0, 0));
+    });
+}
+
+#[test]
 fn approved_proposal_cannot_execute_at_its_deadline() {
     new_test_ext().execute_with(|| {
         use sp_runtime::traits::Hash;
@@ -1390,9 +1421,15 @@ fn approved_action_executes_as_treasury_once() {
             RuntimeOrigin::signed(2), 0, 0,
         ));
 
+        // Confirm that a deadline exists before execution.
+        assert!(crate::ProposalExpiry::<Test>::contains_key(0, 0));
+
         assert_ok!(MultisigTreasury::do_execute(
             0, 0, call.clone(),
         ));
+
+        // Successful execution also removes the deadline.
+        assert!(!crate::ProposalExpiry::<Test>::contains_key(0, 0));
 
         // The action actually changed storage.
         assert_eq!(Something::<Test>::get(), Some(42));
@@ -1454,13 +1491,21 @@ fn failed_execution_preserves_proposal_and_approvals() {
             RuntimeOrigin::signed(2), 0, 0,
         ));
 
+        // Remember the deadline so rollback must restore the same value.
+        let expiry_before = crate::ProposalExpiry::<Test>::get(0, 0)
+            .expect("The proposal must have a deadline before execution");
+
         // Execution fails, and all storage must remain unchanged.
         assert_noop!(
             MultisigTreasury::do_execute(0, 0, call),
             Error::<Test>::NoneValue
         );
 
-        // The proposal and both approvals are still available.
+        // The deadline, proposal and both approvals are still available.
+        assert_eq!(
+            crate::ProposalExpiry::<Test>::get(0, 0),
+            Some(expiry_before)
+        );
         assert_eq!(
             crate::PendingProposals::<Test>::get(0, 0),
             Some((1, action_hash))
