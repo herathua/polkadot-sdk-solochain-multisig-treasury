@@ -472,6 +472,20 @@ pub mod pallet {
 
 		    Ok(())
 		}
+				pub fn treasury_account(multisig_id: u32) -> T::AccountId {
+		    use sp_runtime::traits::{Hash, TrailingZeroInput};
+				
+		    // A fixed namespace keeps this derivation specific to our pallet.
+		    let seed = T::Hashing::hash_of(&(
+		        b"nutrust/multisig-treasury",
+		        multisig_id,
+		    ));
+		
+		    <T::AccountId as codec::Decode>::decode(
+		        &mut TrailingZeroInput::new(seed.as_ref()),
+		    )
+		    .expect("runtime account type must support decoding from hash bytes")
+		}
 		pub(crate) fn ensure_matching_action(
 	    multisig_id: u32,
 	    proposal_id: u32,

@@ -1181,3 +1181,17 @@ fn correct_error_for_none_value() {
 		assert_noop!(MultisigTreasury::cause_error(RuntimeOrigin::signed(1)), Error::<Test>::NoneValue);
 	});
 }
+#[test]
+fn treasury_accounts_are_stable_and_distinct() {
+    new_test_ext().execute_with(|| {
+        let first = MultisigTreasury::treasury_account(0);
+        let repeated = MultisigTreasury::treasury_account(0);
+        let second = MultisigTreasury::treasury_account(1);
+
+        // The same multisig ID gives the same account.
+        assert_eq!(first, repeated);
+
+        // These two multisig IDs give different accounts.
+        assert_ne!(first, second);
+    });
+}
