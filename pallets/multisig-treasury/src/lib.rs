@@ -108,6 +108,13 @@ pub mod pallet {
     (BoundedVec<T::AccountId, T::MaxSigners>, u32),
     OptionQuery,
 	>;
+	/// Voting weight indexed by multisig ID and signer account.
+	/// Currently storage only; voting integration follows separately.
+	#[pallet::storage]
+	pub type SignerWeights<T: Config> = StorageDoubleMap<
+		_, Blake2_128Concat, u32, Blake2_128Concat, T::AccountId, u32, OptionQuery,
+	>;
+
 	/// The ID to allocate to the next multisig configuration.
 	#[pallet::storage]
 	pub type NextMultisigId<T> = StorageValue<_, u32, ValueQuery>;
@@ -198,6 +205,8 @@ pub mod pallet {
 		RejectionVoted { multisig_id: u32, proposal_id: u32, signer: T::AccountId },
 		/// The rejection threshold was reached and the pending proposal was removed.
 		ProposalRejected { multisig_id: u32, proposal_id: u32 },
+		/// An approved action completed successfully as the treasury account.
+		ProposalExecuted { multisig_id: u32, proposal_id: u32, action_hash: T::Hash },
 	}
 
 	/// Errors that can be returned by this pallet.
@@ -252,6 +261,10 @@ pub mod pallet {
 		AlreadyRejected,
 		/// The rejection vote list is full.
 		TooManyRejections,
+		/// A signer must have a voting weight greater than zero.
+		InvalidSignerWeight,
+		/// The sum of signer weights exceeds u32::MAX.
+		SignerWeightOverflow,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -432,6 +445,24 @@ pub mod pallet {
 		}
 	}
 	impl<T: Config> Pallet<T> {
+		/// Validate an individual weight before using it in a signer configuration.
+		pub(crate) fn validate_signer_weight(weight: u32) -> DispatchResult {
+			ensure!(weight > 0, Error::<T>::InvalidSignerWeight);
+			Ok(())
+		}
+
+		/// Sum a bounded list of positive weights without wrapping on overflow.
+		pub(crate) fn total_signer_weight(
+			weights: &BoundedVec<u32, T::MaxSigners>,
+		) -> Result<u32, sp_runtime::DispatchError> {
+			let mut total = 0u32;
+			for weight in weights.iter() {
+				Self::validate_signer_weight(*weight)?;
+				total = total.checked_add(*weight).ok_or(Error::<T>::SignerWeightOverflow)?;
+			}
+			Ok(total)
+		}
+
     	pub(crate) fn validate_threshold(
     	    signers: &BoundedVec<T::AccountId, T::MaxSigners>,
     	    threshold: u32,
@@ -636,7 +667,7 @@ pub mod pallet {
 	    proposal_id: u32,
 	    call: T::RuntimeCall,
 	) -> DispatchResult {
-	    use sp_runtime::traits::Dispatchable;
+	    use sp_runtime::traits::{Dispatchable, Hash};
 	
 	    Self::ensure_ready_to_execute(
 	        multisig_id,
@@ -645,6 +676,7 @@ pub mod pallet {
 	    )?;
 	
 	    let treasury = Self::treasury_account(multisig_id);
+	    let action_hash = T::Hashing::hash_of(&call);
 	
 	    // Consume the proposal before dispatch to prevent reuse.
 	    PendingProposals::<T>::remove(multisig_id, proposal_id);
@@ -656,6 +688,9 @@ pub mod pallet {
 	        frame_system::RawOrigin::Signed(treasury).into(),
 	    )
 	    .map_err(|failure| failure.error)?;
+
+	    // Only successful dispatch produces an execution audit event.
+	    Self::deposit_event(Event::ProposalExecuted { multisig_id, proposal_id, action_hash });
 	
 	    Ok(())
 	}

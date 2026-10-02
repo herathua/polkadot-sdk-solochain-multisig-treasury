@@ -2,6 +2,70 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn total_signer_weight_is_checked() {
+    new_test_ext().execute_with(|| {
+        type Weights = frame_support::BoundedVec<u32, <Test as crate::Config>::MaxSigners>;
+        let weights: Weights = vec![3, 2, 1].try_into().expect("Three weights should fit");
+        assert_ok!(MultisigTreasury::total_signer_weight(&weights), 6);
+
+        // The maximum representable total is accepted exactly.
+        let boundary: Weights = vec![u32::MAX - 1, 1].try_into().expect("Two weights should fit");
+        assert_ok!(MultisigTreasury::total_signer_weight(&boundary), u32::MAX);
+
+        // Exceeding that total must return an error rather than wrap to zero.
+        let overflow: Weights = vec![u32::MAX, 1].try_into().expect("Two weights should fit");
+        assert_noop!(
+            MultisigTreasury::total_signer_weight(&overflow),
+            Error::<Test>::SignerWeightOverflow
+        );
+        let zero_weight: Weights = vec![3, 0, 1].try_into().expect("Three weights should fit");
+        assert_noop!(
+            MultisigTreasury::total_signer_weight(&zero_weight),
+            Error::<Test>::InvalidSignerWeight
+        );
+    });
+}
+
+#[test]
+fn signer_weight_must_be_positive() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(
+            MultisigTreasury::validate_signer_weight(0),
+            Error::<Test>::InvalidSignerWeight
+        );
+        assert_ok!(MultisigTreasury::validate_signer_weight(1));
+        assert_ok!(MultisigTreasury::validate_signer_weight(3));
+    });
+}
+
+#[test]
+fn signer_weights_are_scoped_to_each_multisig() {
+    new_test_ext().execute_with(|| {
+        let signers: frame_support::BoundedVec<
+            u64, <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers.clone(), 2,
+        ));
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+
+        // Direct test setup only: no public weight-setting call exists yet.
+        crate::SignerWeights::<Test>::insert(0, 1u64, 3u32);
+        crate::SignerWeights::<Test>::insert(1, 1u64, 1u32);
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 1u64), Some(3));
+        assert_eq!(crate::SignerWeights::<Test>::get(1, 1u64), Some(1));
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 2u64), None);
+
+        // Changing account 1's weight in multisig 0 leaves multisig 1 untouched.
+        crate::SignerWeights::<Test>::insert(0, 1u64, 5u32);
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 1u64), Some(5));
+        assert_eq!(crate::SignerWeights::<Test>::get(1, 1u64), Some(1));
+    });
+}
+
+#[test]
 fn rejecting_one_proposal_leaves_another_executable() {
     new_test_ext().execute_with(|| {
         use sp_runtime::traits::Hash;
@@ -1743,13 +1807,20 @@ fn approved_action_executes_as_treasury_once() {
         assert_eq!(Something::<Test>::get(), Some(42));
 
         // The treasury account executed the action.
-        System::assert_last_event(
+        System::assert_has_event(
             Event::<Test>::SomethingStored {
                 something: 42,
                 who: MultisigTreasury::treasury_account(0),
             }
             .into(),
         );
+
+        // The final event identifies the proposal and exact action that succeeded.
+        System::assert_last_event(Event::<Test>::ProposalExecuted {
+            multisig_id: 0,
+            proposal_id: 0,
+            action_hash,
+        }.into());
 
         // Successful execution removes the proposal and votes.
         assert!(!crate::PendingProposals::<Test>::contains_key(0, 0));
@@ -1766,6 +1837,9 @@ fn approved_action_executes_as_treasury_once() {
 fn failed_execution_preserves_proposal_and_approvals() {
     new_test_ext().execute_with(|| {
         use sp_runtime::traits::Hash;
+
+        // Events are recorded after the genesis block.
+        System::set_block_number(1);
 
         let signers: frame_support::BoundedVec<
             u64,
@@ -1804,10 +1878,21 @@ fn failed_execution_preserves_proposal_and_approvals() {
             .expect("The proposal must have a deadline before execution");
 
         // Execution fails, and all storage must remain unchanged.
+        let events_before = System::events();
+        assert!(!events_before.is_empty(), "Setup should have recorded events");
         assert_noop!(
             MultisigTreasury::do_execute(0, 0, call),
             Error::<Test>::NoneValue
         );
+
+        // Failed dispatch must not emit a success event or alter earlier events.
+        assert_eq!(System::events(), events_before);
+        let success_event: RuntimeEvent = Event::<Test>::ProposalExecuted {
+            multisig_id: 0,
+            proposal_id: 0,
+            action_hash,
+        }.into();
+        assert!(!System::events().iter().any(|record| record.event == success_event));
 
         // The deadline, proposal and both approvals are still available.
         assert_eq!(
@@ -1871,7 +1956,7 @@ fn signer_can_submit_execution() {
         assert_eq!(Something::<Test>::get(), Some(42));
 
         // The action runs as the treasury, not the submitting signer.
-        System::assert_last_event(
+        System::assert_has_event(
             Event::<Test>::SomethingStored {
                 something: 42,
                 who: MultisigTreasury::treasury_account(0),
