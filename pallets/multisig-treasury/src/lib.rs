@@ -88,6 +88,9 @@ pub mod pallet {
 		/// Maximum number of signers allowed in one multisig account.
 		#[pallet::constant]
 		type MaxSigners: Get<u32>;
+		/// How many blocks a new proposal remains valid.
+		#[pallet::constant]
+		type ProposalLifetime: Get<BlockNumberFor<Self>>;
 	}
 
 	/// A storage item for this pallet.
@@ -230,6 +233,10 @@ pub mod pallet {
 		ProposalExpiryMissing,
 		/// The proposal has reached its expiry block.
 		ProposalExpired,
+		/// Proposal lifetime must be greater than zero.
+		InvalidProposalLifetime,
+		/// The expiry block calculation overflowed.
+		ProposalExpiryOverflow,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -323,7 +330,7 @@ pub mod pallet {
 		#[pallet::call_index(3)]
 		#[pallet::weight(
 		    Weight::from_parts(100_000_000, 10_000)
-		        .saturating_add(T::DbWeight::get().reads_writes(2, 2))
+		        .saturating_add(T::DbWeight::get().reads_writes(2, 3))
 		)]
 		pub fn propose(
 		    origin: OriginFor<T>,
@@ -425,6 +432,8 @@ pub mod pallet {
 	    proposer: T::AccountId,
 	    action_hash: T::Hash,
 	) -> DispatchResult {
+	    use sp_runtime::traits::{CheckedAdd, Zero};
+
 	    let (signers, _threshold) = MultisigAccounts::<T>::get(multisig_id)
 	        .ok_or(Error::<T>::MultisigNotFound)?;
 	
@@ -438,11 +447,18 @@ pub mod pallet {
 	        .checked_add(1)
 	        .ok_or(Error::<T>::ProposalIdOverflow)?;
 	
+	    let lifetime = T::ProposalLifetime::get();
+	    ensure!(!lifetime.is_zero(), Error::<T>::InvalidProposalLifetime);
+	    let expiry = frame_system::Pallet::<T>::block_number()
+	        .checked_add(&lifetime)
+	        .ok_or(Error::<T>::ProposalExpiryOverflow)?;
+
 		PendingProposals::<T>::insert(
     		multisig_id,
     		proposal_id,
     		(proposer.clone(), action_hash),
 		);
+	    ProposalExpiry::<T>::insert(multisig_id, proposal_id, expiry);
 	    NextProposalId::<T>::insert(multisig_id, next_id);
 		Self::deposit_event(Event::ProposalOpened {
     		multisig_id,

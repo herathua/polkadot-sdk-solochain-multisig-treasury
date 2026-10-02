@@ -38,6 +38,7 @@ impl pallet_multisig_treasury::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 	type MaxSigners = frame_support::traits::ConstU32<3>;
+	type ProposalLifetime = frame_support::traits::ConstU64<100>;
 }
 
 // Build genesis storage according to the mock runtime.

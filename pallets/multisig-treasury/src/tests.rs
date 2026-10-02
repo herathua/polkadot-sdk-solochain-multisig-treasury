@@ -2,6 +2,28 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn creating_proposal_stores_its_deadline() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(10);
+
+        let signers: frame_support::BoundedVec<
+            u64,
+            <Test as crate::Config>::MaxSigners,
+        > = vec![1, 2, 3].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::create_multisig(
+            RuntimeOrigin::signed(1), signers, 2,
+        ));
+        assert_ok!(MultisigTreasury::propose(
+            RuntimeOrigin::signed(1), 0, sp_core::H256::repeat_byte(7),
+        ));
+
+        // Creation block 10 + lifetime 100 = deadline 110.
+        assert_eq!(crate::ProposalExpiry::<Test>::get(0, 0), Some(110u64));
+    });
+}
+
+#[test]
 fn it_works_for_default_value() {
 	new_test_ext().execute_with(|| {
 		// Go past genesis block so events get deposited
