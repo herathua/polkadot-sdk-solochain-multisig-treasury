@@ -2,6 +2,75 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn weighted_signer_pairs_are_validated() {
+    new_test_ext().execute_with(|| {
+        type Signers = frame_support::BoundedVec<
+            (u64, u32), <Test as crate::Config>::MaxSigners,
+        >;
+        let valid: Signers = vec![(1, 3), (2, 2), (3, 1)]
+            .try_into().expect("Three signers should fit");
+        assert_ok!(MultisigTreasury::validate_weighted_signers(&valid, 4));
+
+        // The same account cannot gain extra weight through duplicate entries.
+        let duplicate: Signers = vec![(1, 3), (1, 2), (3, 1)]
+            .try_into().expect("Three entries should fit");
+        assert_noop!(
+            MultisigTreasury::validate_weighted_signers(&duplicate, 4),
+            Error::<Test>::DuplicateSigner
+        );
+        let zero: Signers = vec![(1, 3), (2, 0)]
+            .try_into().expect("Two entries should fit");
+        assert_noop!(
+            MultisigTreasury::validate_weighted_signers(&zero, 3),
+            Error::<Test>::InvalidSignerWeight
+        );
+        let overflow: Signers = vec![(1, u32::MAX), (2, 1)]
+            .try_into().expect("Two entries should fit");
+        assert_noop!(
+            MultisigTreasury::validate_weighted_signers(&overflow, 1),
+            Error::<Test>::SignerWeightOverflow
+        );
+        for threshold in [0, 7] {
+            assert_noop!(
+                MultisigTreasury::validate_weighted_signers(&valid, threshold),
+                Error::<Test>::InvalidThreshold
+            );
+        }
+        assert_noop!(
+            MultisigTreasury::validate_weighted_signers(&Signers::default(), 1),
+            Error::<Test>::InvalidThreshold
+        );
+    });
+}
+
+#[test]
+fn weighted_threshold_uses_total_weight() {
+    new_test_ext().execute_with(|| {
+        type Weights = frame_support::BoundedVec<u32, <Test as crate::Config>::MaxSigners>;
+        let weights: Weights = vec![3, 2, 1].try_into().expect("Three weights should fit");
+
+        // Threshold 4 is valid even though there are only three signers.
+        assert_ok!(MultisigTreasury::validate_weighted_threshold(&weights, 4));
+        assert_ok!(MultisigTreasury::validate_weighted_threshold(&weights, 1));
+        assert_ok!(MultisigTreasury::validate_weighted_threshold(&weights, 6));
+        assert_noop!(
+            MultisigTreasury::validate_weighted_threshold(&weights, 0),
+            Error::<Test>::InvalidThreshold
+        );
+        assert_noop!(
+            MultisigTreasury::validate_weighted_threshold(&weights, 7),
+            Error::<Test>::InvalidThreshold
+        );
+
+        // An empty configuration cannot support any positive threshold.
+        assert_noop!(
+            MultisigTreasury::validate_weighted_threshold(&Weights::default(), 1),
+            Error::<Test>::InvalidThreshold
+        );
+    });
+}
+
+#[test]
 fn total_signer_weight_is_checked() {
     new_test_ext().execute_with(|| {
         type Weights = frame_support::BoundedVec<u32, <Test as crate::Config>::MaxSigners>;

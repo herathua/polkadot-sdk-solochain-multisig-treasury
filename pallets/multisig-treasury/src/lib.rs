@@ -463,6 +463,34 @@ pub mod pallet {
 			Ok(total)
 		}
 
+		/// A weighted threshold must be positive and reachable by the combined weights.
+		pub(crate) fn validate_weighted_threshold(
+			weights: &BoundedVec<u32, T::MaxSigners>,
+			threshold: u32,
+		) -> DispatchResult {
+			let total = Self::total_signer_weight(weights)?;
+			ensure!(threshold > 0 && threshold <= total, Error::<T>::InvalidThreshold);
+			Ok(())
+		}
+
+		/// Validate unique signer-weight pairs and a reachable weighted threshold.
+		pub(crate) fn validate_weighted_signers(
+			signers: &BoundedVec<(T::AccountId, u32), T::MaxSigners>,
+			threshold: u32,
+		) -> DispatchResult {
+			let mut total = 0u32;
+			for (index, (account, weight)) in signers.iter().enumerate() {
+				ensure!(
+					!signers[..index].iter().any(|(previous, _)| previous == account),
+					Error::<T>::DuplicateSigner
+				);
+				Self::validate_signer_weight(*weight)?;
+				total = total.checked_add(*weight).ok_or(Error::<T>::SignerWeightOverflow)?;
+			}
+			ensure!(threshold > 0 && threshold <= total, Error::<T>::InvalidThreshold);
+			Ok(())
+		}
+
     	pub(crate) fn validate_threshold(
     	    signers: &BoundedVec<T::AccountId, T::MaxSigners>,
     	    threshold: u32,
