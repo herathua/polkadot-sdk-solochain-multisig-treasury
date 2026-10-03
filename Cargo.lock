@@ -9485,6 +9485,7 @@ dependencies = [
  "pallet-aura",
  "pallet-balances",
  "pallet-grandpa",
+ "pallet-multisig-treasury",
  "pallet-sudo",
  "pallet-template",
  "pallet-timestamp",

@@ -2,6 +2,29 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn invalid_weighted_multisig_changes_nothing() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let duplicate_signers: frame_support::BoundedVec<
+            (u64, u32), <Test as crate::Config>::MaxSigners,
+        > = vec![(1, 3), (2, 2), (1, 1)]
+            .try_into().expect("Three entries should fit");
+        let events_before = System::events();
+
+        // Account 1 occurs twice, so creation must fail before any writes.
+        assert_noop!(
+            MultisigTreasury::do_create_weighted_multisig(duplicate_signers, 4),
+            Error::<Test>::DuplicateSigner
+        );
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 0);
+        assert!(!crate::NextMultisigId::<Test>::exists());
+        assert!(!crate::MultisigAccounts::<Test>::contains_key(0));
+        assert!(crate::SignerWeights::<Test>::iter_prefix(0).next().is_none());
+        assert_eq!(System::events(), events_before);
+    });
+}
+
+#[test]
 fn weighted_multisig_stores_signers_weights_and_threshold() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);

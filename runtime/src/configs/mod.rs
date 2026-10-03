@@ -162,3 +162,12 @@ impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
 }
+
+/// Basic multisig configuration for the development runtime.
+impl pallet_multisig_treasury::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_multisig_treasury::weights::SubstrateWeight<Runtime>;
+	type MaxSigners = ConstU32<3>;
+	// 100 blocks is about ten minutes at the target six-second block interval.
+	type ProposalLifetime = ConstU32<100>;
+}
