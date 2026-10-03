@@ -265,6 +265,8 @@ pub mod pallet {
 		InvalidSignerWeight,
 		/// The sum of signer weights exceeds u32::MAX.
 		SignerWeightOverflow,
+		/// The signer list exceeds the configured bound.
+		TooManySigners,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -514,6 +516,29 @@ pub mod pallet {
 
     	Ok(())
 	}
+		/// Store validated weighted signers. Not exposed as a transaction until voting uses weights.
+		pub(crate) fn do_create_weighted_multisig(
+			weighted_signers: BoundedVec<(T::AccountId, u32), T::MaxSigners>,
+			threshold: u32,
+		) -> DispatchResult {
+			Self::validate_weighted_signers(&weighted_signers, threshold)?;
+			let multisig_id = NextMultisigId::<T>::get();
+			let next_id = multisig_id.checked_add(1).ok_or(Error::<T>::MultisigIdOverflow)?;
+			let mut signers: BoundedVec<T::AccountId, T::MaxSigners> = BoundedVec::default();
+			for (account, _) in weighted_signers.iter() {
+				signers.try_push(account.clone()).map_err(|_| Error::<T>::TooManySigners)?;
+			}
+
+			// Finish all validation before writing any part of the configuration.
+			for (account, weight) in weighted_signers.iter() {
+				SignerWeights::<T>::insert(multisig_id, account, *weight);
+			}
+			MultisigAccounts::<T>::insert(multisig_id, (signers, threshold));
+			NextMultisigId::<T>::put(next_id);
+			Self::deposit_event(Event::MultisigCreated { multisig_id, threshold });
+			Ok(())
+		}
+
 		pub(crate) fn do_create_multisig(
 	    signers: BoundedVec<T::AccountId, T::MaxSigners>,
 	    threshold: u32,

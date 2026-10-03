@@ -2,6 +2,30 @@ use crate::{mock::*, Error, Event, Something};
 use frame_support::{assert_noop, assert_ok};
 
 #[test]
+fn weighted_multisig_stores_signers_weights_and_threshold() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let weighted_signers: frame_support::BoundedVec<
+            (u64, u32), <Test as crate::Config>::MaxSigners,
+        > = vec![(1, 3), (2, 2), (3, 1)].try_into().expect("Three signers should fit");
+
+        assert_ok!(MultisigTreasury::do_create_weighted_multisig(weighted_signers, 4));
+        let (signers, threshold) = crate::MultisigAccounts::<Test>::get(0)
+            .expect("The weighted multisig should exist");
+        assert_eq!(signers.as_slice(), &[1u64, 2, 3]);
+        assert_eq!(threshold, 4);
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 1u64), Some(3));
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 2u64), Some(2));
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 3u64), Some(1));
+        assert_eq!(crate::SignerWeights::<Test>::get(0, 4u64), None);
+        assert_eq!(crate::NextMultisigId::<Test>::get(), 1);
+        System::assert_last_event(Event::<Test>::MultisigCreated {
+            multisig_id: 0, threshold: 4,
+        }.into());
+    });
+}
+
+#[test]
 fn weighted_signer_pairs_are_validated() {
     new_test_ext().execute_with(|| {
         type Signers = frame_support::BoundedVec<
